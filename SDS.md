@@ -1,16 +1,18 @@
 Redis使用SDS(Simple Dynamic String)来实现字符串对象，相关文件为sdsalloc.h、sds.h、sds.c。
 
-##sdsalloc.h
+## sdsalloc.h
 只是"重命名"，仅有三行代码：
+
 ```
 #define s_malloc zmalloc
 #define s_realloc zrealloc
 #define s_free zfree
 ```
 
-##sds.h重要代码
+## sds.h重要代码
 sds.h中定义了5种sdshdr(SDS头部)类型，sdshdr5、sdshdr8、
 sdshdr16、sdshdr32、sdshdr64。其中sdshdr5并不使用，其它类型适用不同长度的字符串，其定义如下：
+
 ```
 /* Note: sdshdr5 is never used, we just access the flags byte directly.
  * However is here to document the layout of type 5 SDS strings. */
