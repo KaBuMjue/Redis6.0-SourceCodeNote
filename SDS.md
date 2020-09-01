@@ -167,3 +167,92 @@ sds sdsnewlen(const void *init, size_t initlen) {
 }
 ```
 新创建的SDS的数据区(即buf)长度由参数initlen指定。 sdsReqType是根据initlen的大小来确定SDS的类型,因为sdshdr5不使用，所以使用TYPE_5的场景一律使用TYPE_8。 sdsHdrSize用来获得对应sdshdr的大小hdrlen,即sizeof(struct sdshdrT)。  随后用s_malloc（即zmalloc）来分配内存，大小为hdrlen+initlen+1，加1是因为**SDS和C风格字符串一样，以'\0'结尾。**这样有时候也能调用标准库中的字符串函数，不用实现SDS版本。  如果参数init为SDS_NOINIT(*const char *SDS_NOINIT = "SDS_NOINIT"*)，表示不初始化内存并将init设为NULL，否则如果init为NULL就初始化内存为0。  之后就是根据类型，修改sdshdr的数据成员。 如果init不为NULL且initlen大于0，则根据init初始化buf区域。
+
+* sdsnew -- 根据C风格的字符串创建一个SDS字符串
+```
+sds sdsnew(const char *init) {
+    size_t initlen = (init == NULL) ? 0 : strlen(init);
+    return sdsnewlen(init, initlen);
+}
+```
+其实内部就是调用了sdsnewlen函数，但这样做方便了上层调用者的使用。
+
+* sdsfree -- 释放SDS字符串的空间
+```
+void sdsfree(sds s) {
+    if (s == NULL) return;
+    s_free((char*)s-sdsHdrSize(s[-1]));
+}
+```
+* sdsupdatelen -- 更新SDS字符串长度(即sdshdr的len属性)
+```
+void sdsupdatelen(sds s) {
+    size_t reallen = strlen(s);
+    sdssetlen(s, reallen);
+}
+```
+关于这个函数的使用，源码注释中给了一个例子：
+```
+s = sdsnew("foobar"); 
+s[2] = '\0'; 
+printf("%d\n",sdslen(s));
+````
+按C风格字符串的话，s的长度应该为2，但实际上s是一个SDS风格的字符串，它内部有一个len属性表示当前s的长度，所以实际s的长度并未修改，输出仍为6。而sdsupdatelen就非常适合这个场景，它能够正确更新s的len属性，只需要在上面例子的第二、三句之间加上 `sdsupdatelen(s);`。
+
+* sdsclear -- 清空SDS字符串
+```
+void sdsclear(sds s) {
+    sdssetlen(s, 0);
+    s[0] = '\0';
+}
+```
+这里的清空只是将len属性设为0，**并未释放任何空间**！*C++STLvector的clear方法也是如此*
+
+* sdsMakeRoomFor -- 为新数据扩充空间（如果需要）
+```
+sds sdsMakeRoomFor(sds s, size_t addlen) {
+    void *sh, *newsh;
+    size_t avail = sdsavail(s);
+    size_t len, newlen;
+    char type, oldtype = s[-1] & SDS_TYPE_MASK;
+    int hdrlen;
+
+    /* Return ASAP if there is enough space left. */
+    if (avail >= addlen) return s;
+
+    len = sdslen(s);
+    sh = (char*)s-sdsHdrSize(oldtype);
+    newlen = (len+addlen);
+    if (newlen < SDS_MAX_PREALLOC)
+        newlen *= 2;
+    else
+        newlen += SDS_MAX_PREALLOC;
+
+    type = sdsReqType(newlen);
+
+    /* Don't use type 5: the user is appending to the string and type 5 is
+     * not able to remember empty space, so sdsMakeRoomFor() must be called
+     * at every appending operation. */
+    if (type == SDS_TYPE_5) type = SDS_TYPE_8;
+
+    hdrlen = sdsHdrSize(type);
+    if (oldtype==type) {
+        newsh = s_realloc(sh, hdrlen+newlen+1);
+        if (newsh == NULL) return NULL;
+        s = (char*)newsh+hdrlen;
+    } else {
+        /* Since the header size changes, need to move the string forward,
+         * and can't use realloc */
+        newsh = s_malloc(hdrlen+newlen+1);
+        if (newsh == NULL) return NULL;
+        memcpy((char*)newsh+hdrlen, s, len+1);
+        s_free(sh);
+        s = (char*)newsh+hdrlen;
+        s[-1] = type;
+        sdssetlen(s, len);
+    }
+    sdssetalloc(s, newlen);
+    return s;
+}
+```
+如果可用空间avail大于addlen，直接返回(*ASAP:as soon as possible*)。如果新长度newlen小于SDS_MAX_PREALLOC(1024*1024,即1MB），将newlen乘2，否则将newlen加上SDS_MAX_PREALLOC。这样做是为了预留一些空间方便下次使用，节省时间。如果扩容后的SDS字符串类型不需要改变，调用realloc在原位置扩容；如果需要改变则需重新分配内存，因为sdshdr的大小改变了。最后更新alloc属性。
