@@ -300,6 +300,21 @@ sds sdsRemoveFreeSpace(sds s) {
 ```
 如果原先的SDS类型oldtype和调整后的类型type一致，或者type大于TYPE_8，就在原有的内存上调用realloc；否则重新开辟一块内存，并释放原有内存。最后更新alloc属性。
 
+* sdscatlen -- 附加字符串到SDS尾
+```c
+sds sdscatlen(sds s, const void *t, size_t len) {
+    size_t curlen = sdslen(s);
+
+    s = sdsMakeRoomFor(s,len);
+    if (s == NULL) return NULL;
+    memcpy(s+curlen, t, len);
+    sdssetlen(s, curlen+len);
+    s[curlen+len] = '\0';
+    return s;
+}
+```
+这里就用到了sdsMakeRoomFor函数，避免了SDS尾部空余空间不足导致访问越界的情况。
+
 * sdsll2str -- 将number --> string
 ```c++
 int sdsll2str(char *s, long long value) {
@@ -343,3 +358,11 @@ sds sdsfromlonglong(long long value) {
     return sdsnewlen(buf,len);
 }
 ```
+
+
+
+## 总结
+* Redis没有直接使用C风格的字符串，而是自己定义了一个SDS(Simple Dynamic String)类型，该类型不仅包含字节数组外，还有len(字节数组有效长度), alloc(字节数组总长度)属性，便于实现其它对SDS进行操作的函
+* SDS的字节数组是遵循C风格的，以'\0'结尾，这样可以调用一些标准库的函数，如printf。
+* SDS还是**二进制安全的**，C风格字符串里不能包含空字符，那会被当作是结尾的标志。但SDS的字节数组是使用len属性来判断是否到达结尾的，SDS的API不会对字符串内容作任何假设、过滤，其内部调用的都是像memcpy,memmove这样直接操纵内存的函数。
+* SDS具有**空间预分配**以及**惰性删除**的特点。
