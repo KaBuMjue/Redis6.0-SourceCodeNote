@@ -1,4 +1,4 @@
-Redis使用SDS(Simple Dynamic String)来实现字符串对象，相关文件为sdsalloc.h、sds.h、sds.c。
+Redis使用SDS(Simple Dynamic String)来实现字符串对象，相关文件为*sdsalloc.h、sds.h、sds.c*。
 
 ## sdsalloc.h
 只是"重命名"，仅有三行代码：
