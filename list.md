@@ -37,6 +37,17 @@ typedef struct list {
 
 
 
+Redis还定义了链表迭代器listIter，即可正向迭代，也可反向迭代。
+
+```c
+typedef struct listIter {
+    listNode *next;	//该迭代器的下一个节点
+    int direction;	//迭代方向， 0为从头开始正向，1为从尾开始反向
+} listIter;
+```
+
+
+
 ## adlist.c
 
 * listCreate   -- 创建一个(空)链表
@@ -115,4 +126,86 @@ typedef struct list {
   如果该函数返回值为NULL，代表添加节点失败，链表不发生变化。
 
   listAddNodeTail 添加节点至链表尾部，实现方法类似，不再赘述。
+
+
+
+* listInsertNode  -- 插入节点到指定节点前/后
+
+  ```c
+  list *listInsertNode(list *list, listNode *old_node, void *value, int after) {
+      listNode *node;
+  
+      if ((node = zmalloc(sizeof(*node))) == NULL)
+          return NULL;
+      node->value = value;
+      if (after) {	//插入到old_node后
+          node->prev = old_node;
+          node->next = old_node->next;
+          if (list->tail == old_node) {	//注意插入末尾的情况
+              list->tail = node;
+          }
+      } else {		//插入到old_node前
+          node->next = old_node;
+          node->prev = old_node->prev;
+          if (list->head == old_node) {	//注意插入头部的情况
+              list->head = node;
+          }
+      }
+      if (node->prev != NULL) {
+          node->prev->next = node;
+      }
+      if (node->next != NULL) {
+          node->next->prev = node;
+      }
+      list->len++;
+      return list;
+  }
+  ```
+
+
+
+* listGetIterator   -- 获取链表的迭代器
+
+  ```c
+  listIter *listGetIterator(list *list, int direction)
+  {
+      listIter *iter;
+  
+      if ((iter = zmalloc(sizeof(*iter))) == NULL) return NULL;
+      if (direction == AL_START_HEAD)		//如果为direction为AL_START_HEAD(0)，从链表头开始
+          iter->next = list->head;		//下一个节点为链表头
+      else
+          iter->next = list->tail;		//否则从链表尾开始
+      iter->direction = direction;		//下一个节点为链表尾
+      return iter;
+  }
+  ```
+
+   
+
+* listNext   -- 获取链表迭代器的下一个节点
+
+```c
+listNode *listNext(listIter *iter)
+{
+    listNode *current = iter->next;
+
+    if (current != NULL) {
+        if (iter->direction == AL_START_HEAD)
+            iter->next = current->next;		//正向迭代
+        else
+            iter->next = current->prev;		//反向迭代
+    }
+    return current;
+}
+```
+
+这个函数的常见使用方式为：
+
+```c
+iter = listGetIterator(list,<direction>);
+while ((node = listNext(iter)) != NULL) {
+	doSomethingWith(listNodeValue(node));
+}
+```
 
