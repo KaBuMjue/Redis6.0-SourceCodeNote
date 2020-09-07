@@ -209,3 +209,95 @@ while ((node = listNext(iter)) != NULL) {
 }
 ```
 
+
+
+* listDup   -- 复制链表
+
+  ```c
+  list *listDup(list *orig)
+  {
+      list *copy;
+      listIter iter;
+      listNode *node;
+  
+      if ((copy = listCreate()) == NULL)
+          return NULL;
+      copy->dup = orig->dup;
+      copy->free = orig->free;
+      copy->match = orig->match;
+      listRewind(orig, &iter);	//将iter设为指向orig头部的迭代器
+      while((node = listNext(&iter)) != NULL) {	//获取orig下一个节点
+          void *value;
+  
+          if (copy->dup) {
+              value = copy->dup(node->value);
+              if (value == NULL) {
+                  listRelease(copy);	//如果失败，释放已分配的新链表
+                  return NULL;
+              }
+          } else
+              value = node->value;
+          if (listAddNodeTail(copy, value) == NULL) {	//添加节点至新链表尾部
+              listRelease(copy);
+              return NULL;
+          }
+      }
+      return copy;
+  }
+  ```
+
+  
+
+* listSearchKey   -- 查找key对应的节点是否在链表中
+
+```c
+listNode *listSearchKey(list *list, void *key)
+{
+    listIter iter;
+    listNode *node;
+
+    listRewind(list, &iter);	//将iter设为指向orig头部的迭代器
+    while((node = listNext(&iter)) != NULL) {
+        if (list->match) {	//如果设置了match函数，使用match来对比节点值和key
+            if (list->match(node->value, key)) {
+                return node;
+            }
+        } else {		//没有设置match函数，key直接与节点值相比
+            if (key == node->value) {
+                return node;	
+            }
+        }
+    }
+    return NULL;	//没找到，返回NULL
+}
+```
+
+
+
+* listJoin   -- 将O链表中的元素全部**"移动"**到L链表中
+
+  ```c
+  void listJoin(list *l, list *o) {
+      if (o->head)
+          o->head->prev = l->tail;
+  
+      if (l->tail)
+          l->tail->next = o->head;
+      else	//如果L链表为空
+          l->head = o->head;
+  
+      if (o->tail) l->tail = o->tail;
+      l->len += o->len;
+  
+      /* Setup other as an empty list. */
+      o->head = o->tail = NULL;
+      o->len = 0;
+  }
+  
+  ```
+
+
+
+## 总结
+
+Redis实现的链表是**双向无环**的，list数据结构中包含头节点指针与尾节点指针，还有长度属性，所以只需要O(1)时间去获取它们，list还具有**多态性**，能够根据不同类型的节点值设置不同的dup、free、match节点值相关函数。
