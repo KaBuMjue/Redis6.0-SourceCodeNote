@@ -96,4 +96,16 @@
   safe属性指示这个迭代器是否为*安全*的，为1则是安全的，可以在迭代时使用dictAdd、dictFind等函数，为0则是不安全的，迭代时只能使用dictNext函数。
 
   
+  
+  ## dict.c
+  
+  *Redis默认使用的哈希函数是SipHash，在siphash.c定义。*
+  
+  接下来就先看看SipHash的实现原理。
+  
+  
+  
+  
+  
+  
 
