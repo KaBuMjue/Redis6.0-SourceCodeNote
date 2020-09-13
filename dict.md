@@ -96,16 +96,153 @@
   safe属性指示这个迭代器是否为*安全*的，为1则是安全的，可以在迭代时使用dictAdd、dictFind等函数，为0则是不安全的，迭代时只能使用dictNext函数。
 
   
-  
+
   ## dict.c
+
+  *Redis6.0默认使用的哈希算法是SipHash，在siphash.c定义。具体实现比较复杂，感兴趣的可以去看看，SipHash的优点是在输入的key值很小时也能产生随机性较好的输出。*
+
   
-  *Redis默认使用的哈希函数是SipHash，在siphash.c定义。*
+
+  * _dictReset   -- 重置哈希表
+
+    ```c
+    static void _dictReset(dictht *ht)
+    {
+        ht->table = NULL;
+        ht->size = 0;
+        ht->sizemask = 0;
+        ht->used = 0;
+    }
+    ```
+
+    
+
+  * _dictInit   -- 初始化字典
+
+    ```c
+    int _dictInit(dict *d, dictType *type,
+            void *privDataPtr)
+    {
+        _dictReset(&d->ht[0]);	
+        _dictReset(&d->ht[1]);
+        d->type = type;
+        d->privdata = privDataPtr;
+        d->rehashidx = -1;
+        d->iterators = 0;
+        return DICT_OK;		//返回0，代表成功
+    } 
+    ```
+
   
-  接下来就先看看SipHash的实现原理。
+
+  * dictCreate   -- 创建一个字典
+
+    ```c
+    dict *dictCreate(dictType *type,
+            void *privDataPtr)
+    {
+        dict *d = zmalloc(sizeof(*d));
+    
+        _dictInit(d,type,privDataPtr);
+        return d;
+    }
+    ```
+
+    这三个函数用来创建、初始化一个字典，代码很简单不需再解释。
+
   
+
+  * dictExpand   -- 扩展哈希表大小为size
+
+    ```c
+    int dictExpand(dict *d, unsigned long size)
+    {
+      /* 如果当前正在rehash或者size小于哈希表大小，返会DICT_ERR（即1）代表失败 */
+      if (dictIsRehashing(d) || d->ht[0].used > size)
+          return DICT_ERR;
+    
+      dictht n; /* 新的哈希表 */
+      unsigned long realsize = _dictNextPower(size);	/* realsize为第一个大于等于size的													 * 2的整数次方 */
+    
+      /* realsize与当前哈希表大小相同，不需要改动 */
+      if (realsize == d->ht[0].size) return DICT_ERR;
+    
+      /* 给新的哈希表分配空间，并初始化相关属性 */
+      n.size = realsize;
+      n.sizemask = realsize-1;
+      n.table = zcalloc(realsize*sizeof(dictEntry*));
+      n.used = 0;
+    
+      /* 如果当前的哈希表为空，无需rehash，直接设置ht[0]即可 */
+      if (d->ht[0].table == NULL) {
+          d->ht[0] = n;
+          return DICT_OK;
+      }
+    
+      /* 设置ht[1]，准备rehash */
+      d->ht[1] = n;
+      d->rehashidx = 0;
+      return DICT_OK;
+    }
+    ```
+
+  ​       这个函数可以用来扩展/收缩哈希表，使得哈希表的负载因子在一个合理的范围内，便于后续的rehash。
+
+
+
+* dictRehash   -- **渐进式**的rehash
+
+  ```c
+  int dictRehash(dict *d, int n) {
+      int empty_visits = n*10;	 /* 每次rehash能够遍历的空桶数目 */
+      if (!dictIsRehashing(d)) return 0;	/* 如果未在rehash，返回0 */
   
+      while(n-- && d->ht[0].used != 0) {
+          dictEntry *de, *nextde;
   
+          /* Note that rehashidx can't overflow as we are sure there are more
+           * elements because ht[0].used != 0 */
+          assert(d->ht[0].size > (unsigned long)d->rehashidx);
+          while(d->ht[0].table[d->rehashidx] == NULL) {
+              d->rehashidx++;
+              if (--empty_visits == 0) return 1; /* 遍历的空桶数达到了empty_visits，返回1表												* 示还未完成rehash */
+          }
+          de = d->ht[0].table[d->rehashidx];
+          /* Move all the keys in this bucket from the old to the new hash HT */
+          while(de) {
+              uint64_t h;
   
+              nextde = de->next;
+              /* Get the index in the new hash table */
+              h = dictHashKey(d, de->key) & d->ht[1].sizemask;
+              de->next = d->ht[1].table[h];
+              d->ht[1].table[h] = de;
+              d->ht[0].used--;
+              d->ht[1].used++;
+              de = nextde;
+          }
+          d->ht[0].table[d->rehashidx] = NULL;
+          d->rehashidx++;
+      }
   
+      /* Check if we already rehashed the whole table... */
+      if (d->ht[0].used == 0) {
+          zfree(d->ht[0].table);
+          d->ht[0] = d->ht[1];
+          _dictReset(&d->ht[1]);
+          d->rehashidx = -1;
+          return 0;
+      }
+  
+      /* More to rehash... */
+      return 1;
+  }
+  
+  ```
+
+  因为Redis是单线程的，所以如果我们有很多的数据需要rehash，想要一次性完成rehash会花费大量的时间，从而阻塞Redis服务器使之在这段时间内停止服务。而这绝不是我们希望的，所以Redis采用**分多次、渐进式的rehash策略**，慢慢的将ht[0]的数据rehash到ht[1]中。从这我们可以知道，ht[0]是平常字典使用的哈希表，数据都存放在这，而ht[1]只在对ht[0]rehash时使用。
+
+  为了能够实现渐进式的rehash，Redis的dictRehash函数在执行时，通过检查所遍历到的空桶节点数目是否到达了某个阈值（如上述代码中的empty_visits），到达这个阈值就返回，等待下次再执行rehash。
+
   
 
