@@ -185,8 +185,8 @@
       return DICT_OK;
     }
     ```
-
-  ​       这个函数可以用来扩展/收缩哈希表，使得哈希表的负载因子在一个合理的范围内，便于后续的rehash。
+  
+    这个函数可以用来扩展/收缩哈希表，使得哈希表的负载因子在一个合理的范围内，便于后续的rehash。
 
 
 
@@ -194,7 +194,7 @@
 
   ```c
   int dictRehash(dict *d, int n) {
-      int empty_visits = n*10;	 /* 每次rehash能够遍历的空桶数目 */
+      int empty_visits = n*10;	 /* 每次rehash最多能遍历的空桶数目 */
       if (!dictIsRehashing(d)) return 0;	/* 如果未在rehash，返回0 */
   
       while(n-- && d->ht[0].used != 0) {
@@ -242,7 +242,27 @@
 
   因为Redis是单线程的，所以如果我们有很多的数据需要rehash，想要一次性完成rehash会花费大量的时间，从而阻塞Redis服务器使之在这段时间内停止服务。而这绝不是我们希望的，所以Redis采用**分多次、渐进式的rehash策略**，慢慢的将ht[0]的数据rehash到ht[1]中。从这我们可以知道，ht[0]是平常字典使用的哈希表，数据都存放在这，而ht[1]只在对ht[0]rehash时使用。
 
-  为了能够实现渐进式的rehash，Redis的dictRehash函数在执行时，通过检查所遍历到的空桶节点数目是否到达了某个阈值（如上述代码中的empty_visits），到达这个阈值就返回，等待下次再执行rehash。
+  因为哈希表中可能会充斥着大量的空桶节点，为了能够实现渐进式的rehash，不长时间的阻塞服务器，Redis的dictRehash函数有一个参数n，代表本次执行rehash的节点数，当rehash的节点数到n后就结束本次rehash，或者通过检查所遍历到的空桶节点数目是否到达了一个阈值（上述代码中的empty_visits，为n*10），到达这个阈值就返回，等待下次再执行rehash。
+
+  在rehash过程中，一个桶节点中可能挂有多个节点(因为使用开链法解决哈希冲突)，所以需要将该桶下的所有节点都转移到新哈希表中。
+  
+  完成rehash后，需要交换ht[0]和ht[1]（不要忘记ht[0]才是字典常使用的哈希表）。
+
+
+
+* dictRehashMilliseconds   -- 在给定的时间(*毫秒为单位*)内进行rehash
+
+  ```c
+  int dictRehashMilliseconds(dict *d, int ms) {
+      long long start = timeInMilliseconds();	 //获取当前时间
+      int rehashes = 0;	//已rehash的节点数
+  
+      while(dictRehash(d,100)) {		//每次rehash100个节点
+          rehashes += 100;
+          if (timeInMilliseconds()-start > ms) break;	//到给定时间了，退出 
+      }
+      return rehashes;	//返回已rehash的节点数
+  }
+  ```
 
   
-
