@@ -240,10 +240,12 @@
   
   ```
 
-  因为Redis是单线程的，所以如果我们有很多的数据需要rehash，想要一次性完成rehash会花费大量的时间，从而阻塞Redis服务器使之在这段时间内停止服务。而这绝不是我们希望的，所以Redis采用**分多次、渐进式的rehash策略**，慢慢的将ht[0]的数据rehash到ht[1]中。从这我们可以知道，ht[0]是平常字典使用的哈希表，数据都存放在这，而ht[1]只在对ht[0]rehash时使用。
+  因为Redis是单线程的，所以如果我们有很多的数据需要rehash，想要一次性完成rehash会花费大量的时间，从而阻塞Redis服务器使之在这段时间内停止服务。而这绝不是我们希望的，所以Redis采用**分多次、渐进式的rehash策略**，慢慢的将ht[0]的数据rehash到ht[1]中。从这我们可以知道，*ht[0]是平常字典使用的哈希表，数据都存放在这，而ht[1]只在对ht[0]rehash时使用*。
 
-  因为哈希表中可能会充斥着大量的空桶节点，为了能够实现渐进式的rehash，不长时间的阻塞服务器，Redis的dictRehash函数有一个参数n，代表本次执行rehash的节点数，当rehash的节点数到n后就结束本次rehash，或者通过检查所遍历到的空桶节点数目是否到达了一个阈值（上述代码中的empty_visits，为n*10），到达这个阈值就返回，等待下次再执行rehash。
+  为了能够实现渐进式的rehash，Redis的dictRehash函数有一个参数n，代表本次执行rehash的节点(又叫桶)数，当rehash的节点数到n后就结束本次rehash。
 
+  但也可能提前结束rehash，通过检查所遍历到的空桶节点数目是否到达了一个阈值（上述代码中的empty_visits，为n*10），到达这个阈值就返回，等待下次再执行rehash。这样做有效避免了当哈希表中存在大量空桶节点时函数执行时间过长，导致服务器阻塞的情况发生。
+  
   在rehash过程中，一个桶节点中可能挂有多个节点(因为使用开链法解决哈希冲突)，所以需要将该桶下的所有节点都转移到新哈希表中。
   
   完成rehash后，需要交换ht[0]和ht[1]（不要忘记ht[0]才是字典常使用的哈希表）。
@@ -265,4 +267,55 @@
   }
   ```
 
+
+
+
+* _dictRehashStep   -- 单步rehash
+
+  ```c
+  static void _dictRehashStep(dict *d) {
+      if (d->iterators == 0) dictRehash(d,1);
+  }
+  ```
+
+  当没有迭代器指向当前这个字典时，执行单步rehash(即只rehash一个桶)。
+
+  在对字典进行查找、更新等操作时，如果该字典正处于rehash的状态，会*顺带*执行该函数。这样做将整个rehash消耗的时间*部分分摊*到了每次对字典的查找、更新操作上。
+
+
+
+* dictAddRaw   -- 向字典中添加一个节点(未设置值)
+
+  ```c
+  dictEntry *dictAddRaw(dict *d, void *key, dictEntry **existing)
+  {
+      long index;
+      dictEntry *entry;
+      dictht *ht;
   
+      if (dictIsRehashing(d)) _dictRehashStep(d);	/* 若字典正处于rehash，												 * 执行单步rehash */
+  
+      /* Get the index of the new element, or -1 if
+       * the element already exists. */
+      if ((index = _dictKeyIndex(d, key, dictHashKey(d,key), existing)) == -1)
+          return NULL;
+  
+      /* Allocate the memory and store the new entry.
+       * Insert the element in top, with the assumption that in a database
+       * system it is more likely that recently added entries are accessed
+       * more frequently. */
+      ht = dictIsRehashing(d) ? &d->ht[1] : &d->ht[0];
+      entry = zmalloc(sizeof(*entry));
+      entry->next = ht->table[index];
+      ht->table[index] = entry;
+      ht->used++;
+  
+      /* entry->key = key,如果设置了keyDup,则调用keydup */
+      dictSetKey(d, entry, key);
+      return entry;
+  }
+  
+  ```
+
+  
+
