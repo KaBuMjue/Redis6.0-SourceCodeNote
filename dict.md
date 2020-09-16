@@ -280,7 +280,7 @@
 
   当没有迭代器指向当前这个字典时，执行单步rehash(即只rehash一个桶)。
 
-  在对字典进行查找、更新等操作时，如果该字典正处于rehash的状态，会*顺带*执行该函数。这样做将整个rehash消耗的时间*部分分摊*到了每次对字典的查找、更新操作上。
+  *在对字典进行查找、更新等操作时，如果该字典正处于rehash的状态，会顺带执行该函数。这样做将整个rehash消耗的时间部分分摊到了每次对字典的查找、更新操作上。*
 
 
 
@@ -317,7 +317,7 @@
   
   ```
 
-  _dictKeyIndex获得key对应哈希表的下标，当key已存在时返回-1，如果字典正在rehash，返回的则是ht[1]的下标。
+  _dictKeyIndex获得节点key对应哈希表的下标，当节点已存在时返回-1，并令existing指向该节点。如果字典正在rehash，返回的则是ht[1]的下标。
   
   如果字典正在rehash，新加的节点会放在ht[1]里。
 
@@ -364,6 +364,49 @@
       dictSetVal(d, existing, val);
       dictFreeVal(d, &auxentry);
       return 0;
+  }
+  ```
+
+
+
+* dictGenericDelete   -- 删除字典中的一个节点
+
+  ```c
+  static dictEntry *dictGenericDelete(dict *d, const void *key, int nofree) {
+      uint64_t h, idx;
+      dictEntry *he, *prevHe;
+      int table;
+  
+      if (d->ht[0].used == 0 && d->ht[1].used == 0) return NULL;
+  
+      if (dictIsRehashing(d)) _dictRehashStep(d);
+      h = dictHashKey(d, key);
+  
+      for (table = 0; table <= 1; table++) {
+          idx = h & d->ht[table].sizemask;
+          he = d->ht[table].table[idx];
+          prevHe = NULL;
+          while(he) {
+              if (key==he->key || dictCompareKeys(d, key, he->key)) {
+                  /* Unlink the element from the list */
+                  if (prevHe)
+                      prevHe->next = he->next;
+                  else
+                      d->ht[table].table[idx] = he->next;
+                  if (!nofree) {
+                      dictFreeKey(d, he);
+                      dictFreeVal(d, he);
+                      zfree(he);
+                  }
+                  d->ht[table].used--;
+                  return he;
+              }
+              prevHe = he;
+              he = he->next;
+          }
+          if (!dictIsRehashing(d)) break;
+      }
+      return NULL; /* not found */
   }
   ```
 
