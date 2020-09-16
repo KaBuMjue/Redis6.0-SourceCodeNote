@@ -317,5 +317,54 @@
   
   ```
 
+  _dictKeyIndex获得key对应哈希表的下标，当key已存在时返回-1，如果字典正在rehash，返回的则是ht[1]的下标。
   
+  如果字典正在rehash，新加的节点会放在ht[1]里。
 
+
+
+* dictAdd   -- 向字典中添加一个节点(设置值)
+
+  ```c
+  int dictAdd(dict *d, void *key, void *val)
+  {
+      dictEntry *entry = dictAddRaw(d,key,NULL);
+  
+      if (!entry) return DICT_ERR;
+      dictSetVal(d, entry, val);
+      return DICT_OK;
+  }
+  ```
+
+  调用dictAddRaw后，若entry不为null，则设置值。
+
+
+
+* dictReplace   -- 重写节点的值(如该节点不存在，添加之)
+
+  ```c
+  int dictReplace(dict *d, void *key, void *val)
+  {
+      dictEntry *entry, *existing, auxentry;
+  
+      /* Try to add the element. If the key
+       * does not exists dictAdd will succeed. */
+      entry = dictAddRaw(d,key,&existing);
+      if (entry) {
+          dictSetVal(d, entry, val);
+          return 1;
+      }
+  
+      /* Set the new value and free the old one. Note that it is important
+       * to do that in this order, as the value may just be exactly the same
+       * as the previous one. In this context, think to reference counting,
+       * you want to increment (set), and then decrement (free), and not the
+       * reverse. */
+      auxentry = *existing;	
+      dictSetVal(d, existing, val);
+      dictFreeVal(d, &auxentry);
+      return 0;
+  }
+  ```
+
+  
