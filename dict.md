@@ -377,9 +377,9 @@
       dictEntry *he, *prevHe;
       int table;
   
-      if (d->ht[0].used == 0 && d->ht[1].used == 0) return NULL;
+      if (d->ht[0].used == 0 && d->ht[1].used == 0) return NULL; 
   
-      if (dictIsRehashing(d)) _dictRehashStep(d);
+      if (dictIsRehashing(d)) _dictRehashStep(d);	//单步rehash
       h = dictHashKey(d, key);
   
       for (table = 0; table <= 1; table++) {
@@ -393,7 +393,7 @@
                       prevHe->next = he->next;
                   else
                       d->ht[table].table[idx] = he->next;
-                  if (!nofree) {
+                  if (!nofree) {			//是否需要释放该节点
                       dictFreeKey(d, he);
                       dictFreeVal(d, he);
                       zfree(he);
@@ -404,10 +404,49 @@
               prevHe = he;
               he = he->next;
           }
-          if (!dictIsRehashing(d)) break;
+          if (!dictIsRehashing(d)) break;	//如果正在rehash，ht[0]中没找到，要去ht[1]找该节点并删除(如果存在的话)
       }
       return NULL; /* not found */
   }
+  ```
+
+  该函数用来实现 dictDelete(dict* ht, const void* key) : `return dictGenericDelete(ht,key,0) ? DICT_OK : DICT_ERR;`  删除一个节点，并*释放其空间(key,val)*。
+  
+  以及 dictUnlink(dict* ht, const void* key) : `return dictGenericDelete(ht,key,1);`
+  
+  将该节点从dict中移除并返回给调用者，注意这是*不释放节点空间的*，因为稍后可能会再用到。使用完后，再通过dictFreeUnlinkedEntry来释放空间。
+  
+  
+
+* _dictClear   -- 清空整个字典
+
+  ```c
+  int _dictClear(dict *d, dictht *ht, void(callback)(void *)) {
+      unsigned long i;
+  
+      /* Free all the elements */
+      for (i = 0; i < ht->size && ht->used > 0; i++) {
+          dictEntry *he, *nextHe;
+  
+          if (callback && (i & 65535) == 0) callback(d->privdata);
+  
+          if ((he = ht->table[i]) == NULL) continue;
+          while(he) {
+              nextHe = he->next;
+              dictFreeKey(d, he);
+              dictFreeVal(d, he);
+              zfree(he);
+              ht->used--;
+              he = nextHe;
+          }
+      }
+      /* Free the table and the allocated cache structure */
+      zfree(ht->table);
+      /* Re-initialize the table */
+      _dictReset(ht);
+      return DICT_OK; /* never fails */
+  }
+  
   ```
 
   
