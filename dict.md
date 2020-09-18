@@ -284,6 +284,39 @@
 
 
 
+* dictFind   -- 查找节点
+
+  ```c
+  dictEntry *dictFind(dict *d, const void *key)
+  {
+      dictEntry *he;
+      uint64_t h, idx, table;
+  
+      if (dictSize(d) == 0) return NULL; /* dict is empty */
+      if (dictIsRehashing(d)) _dictRehashStep(d);	//单步rehash
+      h = dictHashKey(d, key);	// 获得节点的键对应的哈希值
+      for (table = 0; table <= 1; table++) {
+          idx = h & d->ht[table].sizemask;
+          he = d->ht[table].table[idx];
+          while(he) {
+              if (key==he->key || dictCompareKeys(d, key, he->key))
+                  return he;
+              he = he->next;
+          }
+          if (!dictIsRehashing(d)) return NULL;
+      }
+      return NULL;
+  }
+  ```
+
+  如果字典正在rehash，在ht[0]没找到该节点，会再去ht[1]寻找。没找到节点则返回null。
+
+  这个函数只是返回节点，Redis还实现了dictFetchValue函数去获得节点对应的值:
+
+  `dictEntry *he; he = dictFind(d,key); return he ? dictGetVal(he) : NULL; `
+
+
+
 * dictAddRaw   -- 向字典中添加一个节点(未设置值)
 
   ```c
@@ -293,7 +326,7 @@
       dictEntry *entry;
       dictht *ht;
   
-      if (dictIsRehashing(d)) _dictRehashStep(d);	/* 若字典正处于rehash，												 * 执行单步rehash */
+      if (dictIsRehashing(d)) _dictRehashStep(d);	/* 执行单步rehash */
   
       /* Get the index of the new element, or -1 if
        * the element already exists. */
@@ -449,4 +482,9 @@
   
   ```
 
+  这个函数很简单，遍历每个桶，并释放桶上已链表形式连接起来的节点。但这里注意这里的一行代码：`if (callback && (i & 65535) == 0) callback(d->privdata);`
   
+  就是每当遍历了65535个桶后，就执行一次callback函数。 为什么要这样做呢？因为Redis是**单线程**的，而如果要清除的字典中的节点数特别多的话，这个函数就要花费大量的时间从而阻塞服务器。添加这行代码后，Redis就能能在执行该函数期间能够间期性的执行其它操作(执行callback函数)。
+
+
+
