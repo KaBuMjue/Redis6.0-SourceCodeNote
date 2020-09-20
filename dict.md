@@ -88,7 +88,7 @@
       long index;	
       int table, safe;
       dictEntry *entry, *nextEntry;
-      /* unsafe iterator fingerprint for misuse detection. */
+      /* 用来检测是否滥用了不安全迭代器(比如调用了add,find等操作) */
       long long fingerprint;
   } dictIterator;
   ```
@@ -488,3 +488,111 @@
 
 
 
+* dictFingerprint   -- 获得字典指纹(fingerprint)
+
+  ```c
+  long long dictFingerprint(dict *d) {
+      long long integers[6], hash = 0;
+      int j;
+  
+      integers[0] = (long) d->ht[0].table;
+      integers[1] = d->ht[0].size;
+      integers[2] = d->ht[0].used;
+      integers[3] = (long) d->ht[1].table;
+      integers[4] = d->ht[1].size;
+      integers[5] = d->ht[1].used;
+  
+      /* We hash N integers by summing every successive integer with the integer
+       * hashing of the previous sum. Basically:
+       *
+       * Result = hash(hash(hash(int1)+int2)+int3) ...
+       *
+       * This way the same set of integers in a different order will (likely) hash
+       * to a different number. */
+      for (j = 0; j < 6; j++) {
+          hash += integers[j];
+          /* For the hashing step we use Tomas Wang's 64 bit integer hash. */
+          hash = (~hash) + (hash << 21); // hash = (hash << 21) - hash - 1;
+          hash = hash ^ (hash >> 24);
+          hash = (hash + (hash << 3)) + (hash << 8); // hash * 265
+          hash = hash ^ (hash >> 14);
+          hash = (hash + (hash << 2)) + (hash << 4); // hash * 21
+          hash = hash ^ (hash >> 28);
+          hash = hash + (hash << 31);
+      }
+      return hash;
+  }
+  ```
+
+  指纹是一些字典的属性集结而成的longlong类型的数字，*代表着某个时间点字典的状态*。
+
+  指纹只在字典迭代器中使用，当一个**不安全**的迭代器初始化后，记录下当前字典指纹，在该迭代器释放前检查字典指纹是否改变。如果改变了，证明在使用这个迭代器期间执行了不被允许的操作(不安全的迭代器不能执行add、find操作)。
+
+
+
+* dictGetIterator / dictGetSafeIterator    获取一个不安全/安全字典迭代器
+
+  ```c
+  dictIterator *dictGetIterator(dict *d)
+  {
+      dictIterator *iter = zmalloc(sizeof(*iter));
+  
+      iter->d = d;
+      iter->table = 0;	// 默认为ht[0]
+      iter->index = -1;
+      iter->safe = 0;		// 为0代表不安全
+      iter->entry = NULL;
+      iter->nextEntry = NULL;
+      return iter;
+  }
+  
+  dictIterator *dictGetSafeIterator(dict *d) {
+      dictIterator *i = dictGetIterator(d);
+  
+      i->safe = 1;	//为1代表安全
+      return i;
+  }
+  ```
+
+  
+
+* dictNext   -- 获取迭代器iter指示的下一个节点
+
+  ```c
+  dictEntry *dictNext(dictIterator *iter)
+  {
+      while (1) {
+          if (iter->entry == NULL) {
+              dictht *ht = &iter->d->ht[iter->table];
+              if (iter->index == -1 && iter->table == 0) {
+                  if (iter->safe)
+                      iter->d->iterators++;
+                  else
+                      iter->fingerprint = dictFingerprint(iter->d);
+              }
+              iter->index++;
+              if (iter->index >= (long) ht->size) {
+                  if (dictIsRehashing(iter->d) && iter->table == 0) {
+                      iter->table++;
+                      iter->index = 0;
+                      ht = &iter->d->ht[1];
+                  } else {
+                      break;
+                  }
+              }
+              iter->entry = ht->table[iter->index];
+          } else {
+              iter->entry = iter->nextEntry;
+          }
+          if (iter->entry) {
+              /* We need to save the 'next' here, the iterator user
+               * may delete the entry we are returning. */
+              iter->nextEntry = iter->entry->next;
+              return iter->entry;
+          }
+      }
+      return NULL;
+  }
+  ```
+
+  
