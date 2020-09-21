@@ -14,7 +14,7 @@
       void *privdata;		// 私有数据
       dictht ht[2];		// 两个哈希表
       long rehashidx; 	// 如果当前没有在rehash,值为-1
-      unsigned long iterators; 	// 当前字典正在使用的迭代器数目
+      unsigned long iterators; 	// 当前字典正在使用的(安全)迭代器数目
   } dict;
   ```
 
@@ -103,90 +103,90 @@
 
   
 
-  * _dictReset   -- 重置哈希表
+  _dictReset   -- 重置哈希表
 
-    ```c
-    static void _dictReset(dictht *ht)
-    {
-        ht->table = NULL;
-        ht->size = 0;
-        ht->sizemask = 0;
-        ht->used = 0;
-    }
-    ```
-
-    
-
-  * _dictInit   -- 初始化字典
-
-    ```c
-    int _dictInit(dict *d, dictType *type,
-            void *privDataPtr)
-    {
-        _dictReset(&d->ht[0]);	
-        _dictReset(&d->ht[1]);
-        d->type = type;
-        d->privdata = privDataPtr;
-        d->rehashidx = -1;
-        d->iterators = 0;
-        return DICT_OK;		//返回0，代表成功
-    } 
-    ```
+  ```c
+  static void _dictReset(dictht *ht)
+  {
+      ht->table = NULL;
+      ht->size = 0;
+      ht->sizemask = 0;
+      ht->used = 0;
+  }
+  ```
 
   
 
-  * dictCreate   -- 创建一个字典
+  _dictInit   -- 初始化字典
 
-    ```c
-    dict *dictCreate(dictType *type,
-            void *privDataPtr)
-    {
-        dict *d = zmalloc(sizeof(*d));
-    
-        _dictInit(d,type,privDataPtr);
-        return d;
-    }
-    ```
-
-    这三个函数用来创建、初始化一个字典，代码很简单不需再解释。
+  ```c
+  int _dictInit(dict *d, dictType *type,
+          void *privDataPtr)
+  {
+      _dictReset(&d->ht[0]);	
+      _dictReset(&d->ht[1]);
+      d->type = type;
+      d->privdata = privDataPtr;
+      d->rehashidx = -1;
+      d->iterators = 0;
+      return DICT_OK;		//返回0，代表成功
+  } 
+  ```
 
   
 
-  * dictExpand   -- 扩展哈希表大小为size
+  dictCreate   -- 创建一个字典
 
-    ```c
-    int dictExpand(dict *d, unsigned long size)
-    {
-      /* 如果当前正在rehash或者size小于哈希表大小，返会DICT_ERR（即1）代表失败 */
-      if (dictIsRehashing(d) || d->ht[0].used > size)
-          return DICT_ERR;
-    
-      dictht n; /* 新的哈希表 */
-      unsigned long realsize = _dictNextPower(size);	/* realsize为第一个大于等于size的													 * 2的整数次方 */
-    
-      /* realsize与当前哈希表大小相同，不需要改动 */
-      if (realsize == d->ht[0].size) return DICT_ERR;
-    
-      /* 给新的哈希表分配空间，并初始化相关属性 */
-      n.size = realsize;
-      n.sizemask = realsize-1;
-      n.table = zcalloc(realsize*sizeof(dictEntry*));
-      n.used = 0;
-    
-      /* 如果当前的哈希表为空，无需rehash，直接设置ht[0]即可 */
-      if (d->ht[0].table == NULL) {
-          d->ht[0] = n;
-          return DICT_OK;
-      }
-    
-      /* 设置ht[1]，准备rehash */
-      d->ht[1] = n;
-      d->rehashidx = 0;
-      return DICT_OK;
-    }
-    ```
+  ```c
+  dict *dictCreate(dictType *type,
+          void *privDataPtr)
+  {
+      dict *d = zmalloc(sizeof(*d));
   
-    这个函数可以用来扩展/收缩哈希表，使得哈希表的负载因子在一个合理的范围内，便于后续的rehash。
+      _dictInit(d,type,privDataPtr);
+      return d;
+  }
+  ```
+
+  这三个函数用来创建、初始化一个字典，代码很简单不需再解释。
+
+  
+
+  dictExpand   -- 扩展哈希表大小为size
+
+  ```c
+  int dictExpand(dict *d, unsigned long size)
+  {
+    /* 如果当前正在rehash或者size小于哈希表大小，返会DICT_ERR（即1）代表失败 */
+    if (dictIsRehashing(d) || d->ht[0].used > size)
+        return DICT_ERR;
+  
+    dictht n; /* 新的哈希表 */
+    unsigned long realsize = _dictNextPower(size);	/* realsize为第一个大于等于size的													 * 2的整数次方 */
+  
+    /* realsize与当前哈希表大小相同，不需要改动 */
+    if (realsize == d->ht[0].size) return DICT_ERR;
+  
+    /* 给新的哈希表分配空间，并初始化相关属性 */
+    n.size = realsize;
+    n.sizemask = realsize-1;
+    n.table = zcalloc(realsize*sizeof(dictEntry*));
+    n.used = 0;
+  
+    /* 如果当前的哈希表为空，无需rehash，直接设置ht[0]即可 */
+    if (d->ht[0].table == NULL) {
+        d->ht[0] = n;
+        return DICT_OK;
+    }
+  
+    /* 设置ht[1]，准备rehash */
+    d->ht[1] = n;
+    d->rehashidx = 0;
+    return DICT_OK;
+  }
+  ```
+
+  这个函数可以用来扩展/收缩哈希表，使得哈希表的负载因子在一个合理的范围内，便于后续的rehash。
 
 
 
@@ -554,9 +554,29 @@
   }
   ```
 
+
+
+
+* dictReleaseIterator   -- 释放一个迭代器
+
+  ```c
+  void dictReleaseIterator(dictIterator *iter)
+  {
+      if (!(iter->index == -1 && iter->table == 0)) {
+          if (iter->safe)
+              iter->d->iterators--;
+          else
+              assert(iter->fingerprint == dictFingerprint(iter->d));
+      }
+      zfree(iter);
+  }
+  ```
+
+  如果是已经使用过的迭代器(!(iter->index == -1 && iter->table == 0))，如果是*安全*的迭代器，将字典的iterators属性减1，不安全的迭代器比较指纹是否改变，改变则终止程序(使用了assert)。而后释放迭代器空间。
+
   
 
-* dictNext   -- 获取迭代器iter指示的下一个节点
+* dictNext   -- 获取迭代器iter当前指向节点的下一个节点
 
   ```c
   dictEntry *dictNext(dictIterator *iter)
@@ -595,4 +615,60 @@
   }
   ```
 
+  首先判断当前迭代器是否指向null，若指向null，判断迭代器是否为刚刚获取的(iter->index == -1 && iter->table == 0)，而且若为*安全*的迭代器就将字典的iterators属性加1，*不安全*的就记录下当前字典的指纹。将index+1，如果indx大于当前哈希表大小，判断是否正在rehash，如果是则让迭代器指向ht[1]，否则就退出循环返回null。剩下的就很简单了，不用多说。
+
   
+
+* dictGetRandomKey   -- 随机获取一个字典节点
+
+  ```c
+dictEntry *dictGetRandomKey(dict *d)
+  {
+    dictEntry *he, *orighe;
+      unsigned long h;
+      int listlen, listele;
+  
+      if (dictSize(d) == 0) return NULL;
+      if (dictIsRehashing(d)) _dictRehashStep(d);	//单步rehash
+      if (dictIsRehashing(d)) {
+          do {
+              /* We are sure there are no elements in indexes from 0
+               * to rehashidx-1 */
+              h = d->rehashidx + (random() % (d->ht[0].size +
+                                              d->ht[1].size -
+                                              d->rehashidx));
+              he = (h >= d->ht[0].size) ? d->ht[1].table[h - d->ht[0].size] :
+                                        d->ht[0].table[h];
+          } while(he == NULL);
+      } else {
+          do {
+              h = random() & d->ht[0].sizemask;
+              he = d->ht[0].table[h];
+          } while(he == NULL);
+      }
+  
+      /* Now we found a non empty bucket, but it is a linked
+       * list and we need to get a random element from the list.
+       * The only sane way to do so is counting the elements and
+       * select a random index. */
+      listlen = 0;
+      orighe = he;
+      while(he) {
+          he = he->next;
+          listlen++;
+      }
+      listele = random() % listlen;
+      he = orighe;
+      while(listele--) he = he->next;
+      return he;
+  }
+  ```
+  
+  
+  
+  
+  
+  
+  
+  
+
