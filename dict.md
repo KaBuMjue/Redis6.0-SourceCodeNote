@@ -670,7 +670,7 @@
 
   
 
-* dictGetSomeKeys   -- 随机获取一些节点
+* dictGetSomeKeys   -- 随机获取一些节点（可能返回重复的key）
 
   ```c
   unsigned int dictGetSomeKeys(dict *d, dictEntry **des, unsigned int count) {
@@ -685,7 +685,7 @@
       /* Try to do a rehashing work proportional to 'count'. */
       for (j = 0; j < count; j++) {
           if (dictIsRehashing(d))
-              _dictRehashStep(d);
+              _dictRehashStep(d);	//执行count次单步rehash
           else
               break;
       }
@@ -743,7 +743,9 @@
   }
   ```
   
+  注意这个函数返回的(即存放在des中的)节点可能会**重复**，而且可能返回的节点数*小于*count(当while循环执行了maxsteps次后就会返回)。所以这个函数并不适用希望返回的元素良好分布的场景
   
+* dictGetFairRandomKey   -- 随机获取一些节点（较dictGetRandomKey更加良好的分布）
   
   
 
