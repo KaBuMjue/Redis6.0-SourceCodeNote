@@ -619,7 +619,7 @@
 
   
 
-* dictGetRandomKey   -- 随机获取一个字典节点（用于实现某些随机算法）
+* dictGetRandomKey   -- 随机获取一个节点（用于实现某些随机算法）
 
   ```c
   dictEntry *dictGetRandomKey(dict *d)
@@ -743,9 +743,123 @@
   }
   ```
   
-  注意这个函数返回的(即存放在des中的)节点可能会**重复**，而且可能返回的节点数*小于*count(当while循环执行了maxsteps次后就会返回)。所以这个函数并不适用希望返回的元素良好分布的场景
-  
-* dictGetFairRandomKey   -- 随机获取一些节点（较dictGetRandomKey更加良好的分布）
+  注意这个函数返回的(即存放在des中的)节点可能会**重复**，而且可能返回的节点数*小于*count(当while循环执行了maxsteps次后就会返回)。所以这个函数并不适用希望返回的元素良好分布的场景。
   
   
+  
+* dictGetFairRandomKey   -- 随机获取一个节点（较dictGetRandomKey更加良好的分布）
+  
+  ```c
+  #define GETFAIR_NUM_ENTRIES 15
+  dictEntry *dictGetFairRandomKey(dict *d) {
+      dictEntry *entries[GETFAIR_NUM_ENTRIES];
+      unsigned int count = dictGetSomeKeys(d,entries,GETFAIR_NUM_ENTRIES);
+      /* Note that dictGetSomeKeys() may return zero elements in an unlucky
+       * run() even if there are actually elements inside the hash table. So
+       * when we get zero, we call the true dictGetRandomKey() that will always
+       * yeld the element if the hash table has at least one. */
+      if (count == 0) return dictGetRandomKey(d);
+      unsigned int idx = rand() % count;
+      return entries[idx];
+  }
+  ```
+  
+  为什么说dictRandomKey不够公平呢？因为dictRandomKey首先选出一个桶节点，再从桶上“挂”着的链表中随机选取一个元素。*这样就导致处于不同链表(长度不同)的节点被选取的概率不同！*较长的链表中的元素被选取的概率更小。每个节点被选取的概率为 [1/(bucketNums) * 1/(chainLen)]。
+  
+  为了能够更加公平的选取节点，dictGetFairRandomKey通过调用dictGetSomeKeys获得多个桶节点上链表上**所有**的节点(最多GETFAIR_NUM_ENTRIES个)，并存放在数组里，再从数组中随机选取一个节点返回。这样就消除了不同链长导致概率不同的问题。
 
+
+
+* dictScan   -- 迭代字典所有节点
+
+  ```c
+  unsigned long dictScan(dict *d,
+                         unsigned long v,
+                         dictScanFunction *fn,
+                         dictScanBucketFunction* bucketfn,
+                         void *privdata)
+  {
+      dictht *t0, *t1;
+      const dictEntry *de, *next;
+      unsigned long m0, m1;
+  
+      if (dictSize(d) == 0) return 0;
+  
+      /* Having a safe iterator means no rehashing can happen, see _dictRehashStep.
+       * This is needed in case the scan callback tries to do dictFind or alike. */
+      d->iterators++;
+  
+      if (!dictIsRehashing(d)) {
+          t0 = &(d->ht[0]);
+          m0 = t0->sizemask;
+  
+          /* Emit entries at cursor */
+          if (bucketfn) bucketfn(privdata, &t0->table[v & m0]);
+          de = t0->table[v & m0];
+          while (de) {
+              next = de->next;
+              fn(privdata, de);
+              de = next;
+          }
+  
+          /* Set unmasked bits so incrementing the reversed cursor
+           * operates on the masked bits */
+          v |= ~m0;
+  
+          /* Increment the reverse cursor */
+          v = rev(v);
+          v++;
+          v = rev(v);
+  
+      } else {
+          t0 = &d->ht[0];
+          t1 = &d->ht[1];
+  
+          /* Make sure t0 is the smaller and t1 is the bigger table */
+          if (t0->size > t1->size) {
+              t0 = &d->ht[1];
+              t1 = &d->ht[0];
+          }
+  
+          m0 = t0->sizemask;
+          m1 = t1->sizemask;
+  
+          /* Emit entries at cursor */
+          if (bucketfn) bucketfn(privdata, &t0->table[v & m0]);
+          de = t0->table[v & m0];
+          while (de) {
+              next = de->next;
+              fn(privdata, de);
+              de = next;
+          }
+  
+          /* Iterate over indices in larger table that are the expansion
+           * of the index pointed to by the cursor in the smaller table */
+          do {
+              /* Emit entries at cursor */
+              if (bucketfn) bucketfn(privdata, &t1->table[v & m1]);
+              de = t1->table[v & m1];
+              while (de) {
+                  next = de->next;
+                  fn(privdata, de);
+                  de = next;
+              }
+  
+              /* Increment the reverse cursor not covered by the smaller mask.*/
+              v |= ~m1;
+              v = rev(v);
+              v++;
+              v = rev(v);
+  
+              /* Continue while bits covered by mask difference is non-zero */
+          } while (v & (m0 ^ m1));
+      }
+  
+      /* undo the ++ at the top */
+      d->iterators--;
+  
+      return v;
+  }
+  ```
+
+  
