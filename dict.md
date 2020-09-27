@@ -862,5 +862,28 @@
   }
   ```
 
-  刚开始函数的输入参数**v**为0，每次只迭代一个桶(及其链表节点)，并返回下次调用该函数需要输入的**v**。如果返回的v值为0代表迭代结束。
+  刚开始函数的输入参数**v**为0，每次只迭代一个桶(及其链表节点)，并返回下次调用该函数需要输入的**v**。如果返回的v值为0代表迭代结束。**这里v的值并不是普通的自增1，而是先位反转(即二进制位逆序)后加1，再位反转回来。**这样做的好处是即使哈希表的大小改变了，v值不用重新计算，因为我们首先改变的是v的高二进制位。
+  
+  这里使用的位反转算法为(来自http://graphics.stanford.edu/~seander/bithacks.html#ReverseParallel) :
+  
+  ```c
+  static unsigned long rev(unsigned long v) {
+      unsigned long s = CHAR_BIT * sizeof(v); // bit size; must be power of 2
+      unsigned long mask = ~0UL;
+      while ((s >>= 1) > 0) {
+          mask ^= (mask << s);
+          v = ((v >> s) & mask) | ((v << s) & ~mask);
+      }
+      return v;
+  }
+  
+  ```
+  
+  以32位的unsigned long类型数0x12345678为例，大致流程为：先将高16位与低16位反转，即
+  
+  0x12345678 -> 0x56781234；在将两部分的高8位与低8位反转，即 0x56781234 -> 0x78563412
+  
+  ... 反转的粒度不断减小，从16，8，4，2，1，最终这个数的二进制位就反转了！
+  
+  
 
