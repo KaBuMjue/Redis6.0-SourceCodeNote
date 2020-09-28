@@ -78,7 +78,9 @@
 
   值是union类型的，所以针对不同类型的节点，底层使用的值类型可以灵活变化。
 
-  因为Redis处理哈希冲突的方法是*开链法*，所以哈希值相同的节点以链表的形式连接在一起。
+  因为Redis处理哈希冲突的方法是*开链法*，所以哈希值相同的节点以单链表的形式连接在一起。
+
+  
 
 * dictIterator   -- 字典迭代器
 
@@ -107,7 +109,7 @@
 
   ```c
   static void _dictReset(dictht *ht)
-  {
+  {	//属性都初始化为NULL或0
       ht->table = NULL;
       ht->size = 0;
       ht->sizemask = 0;
@@ -162,7 +164,7 @@
         return DICT_ERR;
   
     dictht n; /* 新的哈希表 */
-    unsigned long realsize = _dictNextPower(size);	/* realsize为第一个大于等于size的													 * 2的整数次方 */
+    unsigned long realsize = _dictNextPower(size);	/* realsize为第一个大于等于													     * size的2的整数次方 */
   
     /* realsize与当前哈希表大小相同，不需要改动 */
     if (realsize == d->ht[0].size) return DICT_ERR;
@@ -205,7 +207,8 @@
           assert(d->ht[0].size > (unsigned long)d->rehashidx);
           while(d->ht[0].table[d->rehashidx] == NULL) {
               d->rehashidx++;
-              if (--empty_visits == 0) return 1; /* 遍历的空桶数达到了empty_visits，返回1表												* 示还未完成rehash */
+              if (--empty_visits == 0) return 1; /*遍历的空桶数达到了		 
+              							empty_visits，返回1表示还未完成rehash */
           }
           de = d->ht[0].table[d->rehashidx];
           /* Move all the keys in this bucket from the old to the new hash HT */
@@ -238,12 +241,12 @@
       return 1;
   }
   
-  ```
-
-  因为Redis是单线程的，所以如果我们有很多的数据需要rehash，想要一次性完成rehash会花费大量的时间，从而阻塞Redis服务器使之在这段时间内停止服务。而这绝不是我们希望的，所以Redis采用**分多次、渐进式的rehash策略**，慢慢的将ht[0]的数据rehash到ht[1]中。从这我们可以知道，*ht[0]是平常字典使用的哈希表，数据都存放在这，而ht[1]只在对ht[0]rehash时使用*。
-
-  为了能够实现渐进式的rehash，Redis的dictRehash函数有一个参数n，代表本次执行rehash的节点(又叫桶)数，当rehash的节点数到n后就结束本次rehash。
-
+```
+  
+因为Redis是单线程的，所以如果我们有很多的数据需要rehash，想要一次性完成rehash会花费大量的时间，从而阻塞Redis服务器使之在这段时间内停止服务。而这绝不是我们希望的，所以Redis采用**分多次、渐进式的rehash策略**，慢慢的将ht[0]的数据rehash到ht[1]中。从这我们可以知道，*ht[0]是平常字典使用的哈希表，数据都存放在这，而ht[1]只在对ht[0]rehash时使用*。
+  
+为了能够实现渐进式的rehash，Redis的dictRehash函数有一个参数n，代表本次执行rehash的节点(又叫桶)数，当rehash的节点数到n后就结束本次rehash。
+  
   但也可能提前结束rehash，通过检查所遍历到的空桶节点数目是否到达了一个阈值（上述代码中的empty_visits，为n*10），到达这个阈值就返回，等待下次再执行rehash。这样做有效避免了当哈希表中存在大量空桶节点时函数执行时间过长，导致服务器阻塞的情况发生。
   
   在rehash过程中，一个桶节点中可能挂有多个节点(因为使用开链法解决哈希冲突)，所以需要将该桶下的所有节点都转移到新哈希表中。
@@ -350,9 +353,8 @@
   
   ```
 
-  _dictKeyIndex获得节点key对应哈希表的下标，当节点已存在时返回-1，并令existing指向该节点。如果字典正在rehash，返回的则是ht[1]的下标。
+  _dictKeyIndex获得节点key对应哈希表的下标，当节点已存在时返回-1，并令existing指向该节点。如果字典正在rehash，返回的则是key在ht[1]的位置，新加的节点会放在ht[1]里。
   
-  如果字典正在rehash，新加的节点会放在ht[1]里。
 
 
 
@@ -886,4 +888,11 @@
   ... 反转的粒度不断减小，从16，8，4，2，1，最终这个数的二进制位就反转了！
   
   
+
+## 总结
+
+* Redis中的字典使用哈希表作为实现，每个字典都有**2个**哈希表，一个平时使用，另一个只在rehash时使用。
+
+* 哈希表采用**开链法**解决键地址冲突，分配到相同地址的哈希表节点以**单链表**的形式连接起来。
+* 字典的rehash过程**不是一次性完成**的(避免阻塞Redis服务器)，而是**渐进式**的完成，而且会将rehash的步骤分摊到每次对字典的增、删、查、改上(额外执行一次单步rehash)。
 
