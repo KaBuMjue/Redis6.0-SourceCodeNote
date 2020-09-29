@@ -5,5 +5,6 @@
 * 内存管理，源文件为zmalloc.h, zmalloc.c
 * SDS(Simple Dynamic String)，源文件为sdsalloc.h, sds.h, sds.c
 * 链表，源文件为adlist.h、adlist.c
-* 字典，源文件为dict.h, dict.c, 
+* 字典，源文件为dict.h, dict.c
+* 跳跃表， 源文件为server.h
 
