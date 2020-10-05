@@ -6,14 +6,27 @@
 
   ```c
   typedef struct zskiplistNode {
-      sds ele;
-      double score;
-      struct zskiplistNode *backward;
+      sds ele;		// 数据
+      double score;		// 分值，用来排序
+      struct zskiplistNode *backward;		// 指向前一节点
       struct zskiplistLevel {
-          struct zskiplistNode *forward;
-          unsigned long span;
+          struct zskiplistNode *forward;	//指向表尾方向的下一节点
+          unsigned long span;		// forward指向的节点与当前节点的距离，即跨度
       } level[];
   } zskiplistNode;
+  ```
+
+
+
+
+* zskiplist   -- 跳跃表
+
+  ```c
+  typedef struct zskiplist {
+      struct zskiplistNode *header, *tail;	//表头、表尾节点
+      unsigned long length;	//跳跃表所含节点数
+      int level;				//跳跃表中层数最大的节点的层数
+  } zskiplist;
   ```
 
   
