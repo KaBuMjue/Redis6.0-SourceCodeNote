@@ -1,4 +1,4 @@
-*跳跃表(skiplist)是一种有序数据结构，可看成多级链表。跳跃表的查找操作平均复杂度为O(logn)，最坏情况为O(n)，大多数情况下跳跃表的效率可与平衡树媲美，而且跳跃表的实现更加简单，是代替平衡树的一个很好的选择。Redis跳跃表数据结构在server.h中定义，相关函数在t_zset.c中实现。Redis跳跃表的设计理念基于William Pugh的https://www.epaperpress.com/sortsearch/download/skiplist.pdf不了解跳跃表的务必看看这篇论文，不然源码还是有些难以理解的*
+*跳跃表(skiplist)是一种有序数据结构，可看成多级链表。跳跃表的查找操作平均复杂度为O(logn)，最坏情况为O(n)，大多数情况下跳跃表的效率可与平衡树媲美，而且跳跃表的实现更加简单，是代替平衡树的一个很好的选择。Redis跳跃表的设计理念基于William Pugh的https://www.epaperpress.com/sortsearch/download/skiplist.pdf不了解跳跃表的务必看看这篇论文，不然源码还是有些难以理解的。Redis跳跃表数据结构在server.h中定义，相关函数在t_zset.c中实现。*
 
 
 
