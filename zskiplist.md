@@ -2,6 +2,8 @@
 
 
 
+## 数据结构
+
 * zskipklistNode  -- 跳跃表节点
 
   ```c
@@ -32,6 +34,10 @@
 
 
 
+
+## 函数实现
+
+
 * zslCreateNode   -- 创建跳跃表节点
 
   ```c
@@ -44,5 +50,74 @@
   }
   ```
 
+  创建一个给定层数(level)、分值(score)、数据(ele)的节点。
   
+  
+
+* zslCreate   -- 创建一个新跳跃表
+
+  ```c
+  zskiplist *zslCreate(void) {
+      int j;
+      zskiplist *zsl;
+  
+      zsl = zmalloc(sizeof(*zsl));
+      zsl->level = 1;
+      zsl->length = 0;
+      zsl->header = zslCreateNode(ZSKIPLIST_MAXLEVEL,0,NULL);
+      for (j = 0; j < ZSKIPLIST_MAXLEVEL; j++) {
+          zsl->header->level[j].forward = NULL;
+          zsl->header->level[j].span = 0;
+      }
+      zsl->header->backward = NULL;
+      zsl->tail = NULL;
+      return zsl;
+  }
+  ```
+
+  ZSKIPLIST_MAXLEVEL宏定义为**32**，表明Redis的跳跃表支持的最大层次为32。注意该函数将头节点的层次设为最大，并且每层的前向指针为NULL，这与William Pugh的论文实现一致。
+
+
+
+* zslFreeNode   -- 释放跳跃表节点
+
+  ```c
+  void zslFreeNode(zskiplistNode *node) {
+      sdsfree(node->ele);	//注意还要释放ele
+      zfree(node);
+  }
+  ```
+
+  
+
+* zslFree   -- 释放跳跃表
+
+  ```c
+  void zslFree(zskiplist *zsl) {
+      zskiplistNode *node = zsl->header->level[0].forward, *next;
+  
+      zfree(zsl->header);
+      while(node) {	//类似单链表的释放
+          next = node->level[0].forward;
+          zslFreeNode(node);
+          node = next;
+      }
+      zfree(zsl);
+  }
+  ```
+
+
+
+* zslRandomLevel   -- 获得随机层次
+
+  ```c
+  int zslRandomLevel(void) {
+      int level = 1;
+      while ((random()&0xFFFF) < (ZSKIPLIST_P * 0xFFFF))
+          level += 1;
+      return (level<ZSKIPLIST_MAXLEVEL) ? level : ZSKIPLIST_MAXLEVEL;
+  }
+  ```
+
+  ZSKIPLIST_P宏定义为0.25，所以level选取到高层次的概率很小(论文里选取的是0.5).
 
