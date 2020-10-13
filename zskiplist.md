@@ -121,3 +121,69 @@
 
   ZSKIPLIST_P宏定义为0.25，所以level选取到高层次的概率很小(论文里选取的是0.5).
 
+
+
+* zslInsert   -- 插入一个新节点
+
+  ```c
+  zskiplistNode *zslInsert(zskiplist *zsl, double score, sds ele) {
+      zskiplistNode *update[ZSKIPLIST_MAXLEVEL], *x;
+      unsigned int rank[ZSKIPLIST_MAXLEVEL];
+      int i, level;
+  
+      serverAssert(!isnan(score));	// 判断score是否为合法数字
+      x = zsl->header;
+      for (i = zsl->level-1; i >= 0; i--) {
+          /* store rank that is crossed to reach the insert position */
+          rank[i] = i == (zsl->level-1) ? 0 : rank[i+1];
+          while (x->level[i].forward &&
+                  (x->level[i].forward->score < score ||
+                      (x->level[i].forward->score == score &&
+                      sdscmp(x->level[i].forward->ele,ele) < 0)))
+          {
+              rank[i] += x->level[i].span;
+              x = x->level[i].forward;
+          }
+          update[i] = x;
+      }
+      /* we assume the element is not already inside, since we allow duplicated
+       * scores, reinserting the same element should never happen since the
+       * caller of zslInsert() should test in the hash table if the element is
+       * already inside or not. */
+      level = zslRandomLevel();
+      if (level > zsl->level) {
+          for (i = zsl->level; i < level; i++) {
+              rank[i] = 0;
+              update[i] = zsl->header;
+              update[i]->level[i].span = zsl->length;
+          }
+          zsl->level = level;
+      }
+      x = zslCreateNode(level,score,ele);
+      for (i = 0; i < level; i++) {
+          x->level[i].forward = update[i]->level[i].forward;
+          update[i]->level[i].forward = x;
+  
+          /* update span covered by update[i] as x is inserted here */
+          x->level[i].span = update[i]->level[i].span - (rank[0] - rank[i]);
+          update[i]->level[i].span = (rank[0] - rank[i]) + 1;
+      }
+  
+      /* increment span for untouched levels */
+      for (i = level; i < zsl->level; i++) {
+          update[i]->level[i].span++;
+      }
+  
+      x->backward = (update[0] == zsl->header) ? NULL : update[0];
+      if (x->level[0].forward)
+          x->level[0].forward->backward = x;
+      else
+          zsl->tail = x;
+      zsl->length++;
+      return x;
+  }
+  ```
+
+  插入算法与论文的实现原理基本一致，但允许重复的分值出现，还有对卫星数据的比较:
+
+  `sdscmp(x->level[i].forward->ele,ele) < 0)`
