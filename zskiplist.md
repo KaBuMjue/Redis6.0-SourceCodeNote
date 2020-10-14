@@ -187,3 +187,31 @@
   插入算法与论文的实现原理基本一致，但允许重复的分值出现，还有对卫星数据的比较:
 
   `sdscmp(x->level[i].forward->ele,ele) < 0)`
+
+
+
+* zslDeleteNode   -- 删除节点（为辅助函数）
+
+  ```c
+  void zslDeleteNode(zskiplist *zsl, zskiplistNode *x, zskiplistNode **update) {
+      int i;
+      for (i = 0; i < zsl->level; i++) {
+          if (update[i]->level[i].forward == x) {
+              update[i]->level[i].span += x->level[i].span - 1;
+              update[i]->level[i].forward = x->level[i].forward;
+          } else {
+              update[i]->level[i].span -= 1;
+          }
+      }
+      if (x->level[0].forward) {
+          x->level[0].forward->backward = x->backward;
+      } else {
+          zsl->tail = x->backward;
+      }
+      while(zsl->level > 1 && zsl->header->level[zsl->level-1].forward == NULL)
+          zsl->level--;
+      zsl->length--;
+  }
+  ```
+
+  
