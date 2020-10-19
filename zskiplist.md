@@ -190,6 +190,43 @@
 
 
 
+* zslDelete   -- 删除分值为参数score的元素
+
+  ```c
+  int zslDelete(zskiplist *zsl, double score, sds ele, zskiplistNode **node) {
+      zskiplistNode *update[ZSKIPLIST_MAXLEVEL], *x;
+      int i;
+  
+      x = zsl->header;
+      for (i = zsl->level-1; i >= 0; i--) {
+          while (x->level[i].forward &&
+                  (x->level[i].forward->score < score ||
+                      (x->level[i].forward->score == score &&
+                       sdscmp(x->level[i].forward->ele,ele) < 0)))
+          {
+              x = x->level[i].forward;
+          }
+          update[i] = x;
+      }
+      /* We may have multiple elements with the same score, what we need
+       * is to find the element with both the right score and object. */
+      x = x->level[0].forward;
+      if (x && score == x->score && sdscmp(x->ele,ele) == 0) {
+          zslDeleteNode(zsl, x, update);
+          if (!node)
+              zslFreeNode(x);
+          else
+              *node = x;
+          return 1;
+      }
+      return 0; /* not found */
+  }
+  ```
+
+
+
+
+
 * zslDeleteNode   -- 删除节点（为辅助函数）
 
   ```c
